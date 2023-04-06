@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 
+const locallydb = require("locallydb")
+const db = new locallydb("./mydb")
+const things = db.collection("things")
+
 const fs = require("fs/promises");
 const http = require("http"); // import the http library from node
 // "data store" that we'll dump all the things in
@@ -37,12 +41,8 @@ const requestHandler = (req, res) => {
     // if authed, do the thing
     if(user) {
       getBody(req).then(body => {
-        body.id = lastId++;
-        // record creator
         body.who = user;
-        listOfThings.push(body);
-        // update on-disk copy
-        fs.writeFile("things.json", JSON.stringify(listOfThings, null, 2))
+        things.insert(body)
         res.writeHead(201)
       })
       .catch(() => res.writeHead(400))
@@ -52,10 +52,8 @@ const requestHandler = (req, res) => {
     const user = authenticate(req,res)
     if(user) {
       getBody(req).then(body => {
-        const idx = listOfThings.findIndex(t => t.id === body.id)
         body.who = user;
-        listOfThings[idx] = body
-        fs.writeFile("things.json", JSON.stringify(listOfThings, null, 2))
+        things.replace(body.cid*1, body)
         res.writeHead(200)
       })
       .catch(() => res.writeHead(400))
@@ -66,10 +64,9 @@ const requestHandler = (req, res) => {
     if(user) {
       const match = req.url.match(/\/api\/(\d+)/)
       if(match && match[1]) {
-        listOfThings = listOfThings.filter(
-          t => t.id != match[1]
-        )
-        fs.writeFile("things.json", JSON.stringify(listOfThings, null, 2))
+        console.log(match[1])
+        things.remove(1*match[1])
+        things.save()
         res.writeHead(200)
         res.end()
       } else {
@@ -83,7 +80,7 @@ const requestHandler = (req, res) => {
       "Content-Type": "application/json",
     })
     res.write(JSON.stringify(
-      listOfThings
+      things.items 
     ))
     res.end()
   }
@@ -92,15 +89,4 @@ const requestHandler = (req, res) => {
 // create the server and provide it the handler
 const server = http.createServer(requestHandler);
 
-// initialize data structure from disk
-fs.readFile("things.json")
-  // first just read in the array
-  .then(things => listOfThings = JSON.parse(things))
-  // the next two lines finds the biggest id in the array
-  .then(things => things.map(t => t.id))
-  .then(ids => Math.max(...ids))
-  // initialize our id counter to avoid conflicting ids
-  .then(maxid => lastId = maxid + 1)
-  .catch(() => listOfThings = [])
-  // now that we're initialized, instruct server to listen on TCP port 3000
-  .finally(() => server.listen(3000))
+server.listen(3000)
