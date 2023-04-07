@@ -1,74 +1,14 @@
 #!/usr/bin/env node
 
 const fs = require("fs/promises");
-const crypto = require("crypto");
 const http = require("http"); // import the http library from node
 // "data store" that we'll dump all the things in
 let listOfThings = [];
 // We'll assign unique ids to the incoming data, incrementing
 let lastId = 0;
 
-/* a function that parses a string as either form query or json
- * @param str {String} the string to be parsed.
- * @param type {String} a content-type string
- * @return {Object} A javascript value parsed.
- */
-const parseData = (str, type) => {
-  if(type === "application/x-www-form-urlencoded") {
-    return Object.fromEntries(str.split("&").map((q) => q.split("=")))
-  } else {
-    return JSON.parse(str)
-  }
-}
-
-/* get the body from a request, semi-intelligently
- * @param req {http.request} the request object, duh.
- * @return {Promise} that might someday contain a javascript value parsed from
- *   the body of the request
- */
-const getBody = (req) => new Promise((resolve, reject) => {
-  let body = ""
-  // accumulate body
-  req.on("data", (data) => {
-    body += data
-  })
-  // body complete, try to parse
-  req.on("end", () => {
-    try {
-      const parsed = parseData(body, req.headers["content-type"])
-      resolve(parsed)
-    } catch (e) {
-      reject(parsed)
-    }
-  })
-})
-
-/* helper function to get a username/password tuple from request headers.
- * Returns an empty array if no authorization header is present
- */
-const parseBasic = (req) => {
-  if(req.headers.authorization) {
-    // split the value of the header "Basic lwjkjvljk"
-    const [ _, value ] = req.headers.authorization.split(" ")
-    // decode base64 string into binary values in a buffer
-    const buff = Buffer.from(value, 'base64')
-    // convert the buffer into string and split user:pass
-    return buff.toString().split(":")
-  }
-  return []
-}
-
-/* simple encapsulation of responding with Basic authentication request */
-const promptForAuth = (res) => {
-  res.writeHead(401, {
-    "WWW-Authenticate": "Basic"
-  })
-  res.end()
-}
-
-/* helper function to produce a hash of some string */
-const sha256 = (content) => crypto.createHash("sha256")
-   .update(content).digest("hex");
+const getBody = require("./httpHelpers")
+const { parseBasic, promptForAuth, sha256 } = require("./authHelpers")
 
 /* our authentication mechanism proper. returns username "chuck" if the request contains
  * the Basic authorization header containg the right username and password. Otherwise it
