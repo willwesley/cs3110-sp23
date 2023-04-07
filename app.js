@@ -1,5 +1,23 @@
 #!/usr/bin/env node
 
+const sqlite3 = require("sqlite3");
+const db = new sqlite3.Database("stufff.db")
+// db.run(`CREATE TABLE things (
+//   id INTEGER PRIMARY KEY AUTOINCREMENT,
+//   n INTEGER,
+//   x float(10,9),
+//   y float(10,9),
+//   who VARCHAR(255)
+// )
+// `)
+// db.run(`CREATE TABLE users (
+//   id INTEGER PRIMARY KEY AUTOINCREMENT,
+//   username VARCHAR(255),
+//   pass VARCHAR(255)
+// )
+// `)
+//db.run("INSERT INTO users (username, pass) VALUES ('chuck', 'f52fbd32b2b3b86ff88ef6c490628285f482af15ddcb29541f94bcf526a3f6c7')")
+
 const fs = require("fs/promises");
 const http = require("http"); // import the http library from node
 // "data store" that we'll dump all the things in
@@ -15,12 +33,24 @@ const { parseBasic, promptForAuth, sha256 } = require("./authHelpers")
  * prompts for a username and password by sending the appropriate headers and response code
  * to the browser and returns false
  */
-const authenticate = (req, res) => {
+const authenticate = async (req, res) => {
   const [user, pass] = parseBasic(req)
-  // You will probably want to change this next line to a call to a function that does some
-  // sort of look up and password comparison
-  if(user === "chuck" && sha256(pass) === "f52fbd32b2b3b86ff88ef6c490628285f482af15ddcb29541f94bcf526a3f6c7") {
-    return user
+  if(user && pass) {
+    const lookup = db.prepare(
+      "SELECT username FROM users WHERE username=? AND pass=?")
+
+    const soundslike = await new Promise((resolve, reject) => {
+      lookup.get(user, sha256(pass), (err, user) => {
+        if(err) {
+          reject(err)
+        } else {
+          resolve(user && user.username)
+        }
+      })
+    })
+    if(soundslike) {
+      return soundslike
+    }
   }
   promptForAuth(res)
   return false
@@ -30,46 +60,47 @@ const authenticate = (req, res) => {
  * @param req {http.request} the request object
  * @param res {http.response} the object for sending a response
  */
-const requestHandler = (req, res) => {
+const requestHandler = async (req, res) => {
   if(req.method === "POST") {
     // check for auth
-    const user = authenticate(req,res)
+    const user = await authenticate(req,res)
     // if authed, do the thing
     if(user) {
       getBody(req).then(body => {
-        body.id = lastId++;
-        // record creator
-        body.who = user;
-        listOfThings.push(body);
-        // update on-disk copy
-        fs.writeFile("things.json", JSON.stringify(listOfThings, null, 2))
+        const insert = db.prepare(
+          "INSERT INTO things (n, x, y, who) VALUES (?, ?, ?, ?)")
+
+        insert.run(body.n, body.x, body.y, user)
+
         res.writeHead(201)
       })
       .catch(() => res.writeHead(400))
       .finally(() => res.end())
     }
   } else if(req.method === "PUT") {
-    const user = authenticate(req,res)
+    const user = await authenticate(req,res)
     if(user) {
       getBody(req).then(body => {
-        const idx = listOfThings.findIndex(t => t.id === body.id)
-        body.who = user;
-        listOfThings[idx] = body
-        fs.writeFile("things.json", JSON.stringify(listOfThings, null, 2))
+        const update = db.prepare(
+          "UPDATE things SET n=?, x=?, y=?, who=? WHERE id=?")
+
+        update.run(body.n, body.x, body.y, user, body.id)
+
         res.writeHead(200)
       })
       .catch(() => res.writeHead(400))
       .finally(() => res.end())
     }
   } else if(req.method === "DELETE") {
-    const user = authenticate(req,res)
+    const user = await authenticate(req,res)
     if(user) {
       const match = req.url.match(/\/api\/(\d+)/)
       if(match && match[1]) {
-        listOfThings = listOfThings.filter(
-          t => t.id != match[1]
-        )
-        fs.writeFile("things.json", JSON.stringify(listOfThings, null, 2))
+        const remove = db.prepare(
+          "DELETE FROM things WHERE id=?")
+
+        remove.run(match[1])
+
         res.writeHead(200)
         res.end()
       } else {
@@ -78,29 +109,22 @@ const requestHandler = (req, res) => {
       }
     }
   } else {
-    // default assumes GET
-    res.writeHead(200, {
-      "Content-Type": "application/json",
+    db.all("SELECT * FROM things", (err, things) => {
+      if(err) {
+        res.writeHead(500)
+      } else {
+        res.writeHead(200, {
+          "Content-Type": "application/json",
+        })
+        res.write(JSON.stringify(
+          things
+        ))
+      }
+      res.end()
     })
-    res.write(JSON.stringify(
-      listOfThings
-    ))
-    res.end()
   }
 }
 
 // create the server and provide it the handler
 const server = http.createServer(requestHandler);
-
-// initialize data structure from disk
-fs.readFile("things.json")
-  // first just read in the array
-  .then(things => listOfThings = JSON.parse(things))
-  // the next two lines finds the biggest id in the array
-  .then(things => things.map(t => t.id))
-  .then(ids => Math.max(...ids))
-  // initialize our id counter to avoid conflicting ids
-  .then(maxid => lastId = maxid + 1)
-  .catch(() => listOfThings = [])
-  // now that we're initialized, instruct server to listen on TCP port 3000
-  .finally(() => server.listen(3000))
+server.listen(3000)
