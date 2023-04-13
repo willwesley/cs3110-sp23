@@ -3,19 +3,21 @@
 const locallydb = require("locallydb")
 const db = new locallydb("./mydb")
 const things = db.collection("things")
+const users = db.collection("users")
 
 // import http and helpers
 const http = require("http");
 const getBody = require("./httpHelpers")
 const { parseBasic, promptForAuth, sha256 } = require("./authHelpers")
 
-// data store for users with a default admin account
-const users = {
-  chuck: {
-    password: "f52fbd32b2b3b86ff88ef6c490628285f482af15ddcb29541f94bcf526a3f6c7",
-    admin: true
-  }
-};
+if(users.items.length === 0) {
+  // no users? first run probably, let's addd a default account
+  users.insert({
+    user: "chuck",
+    password: sha256("password"),
+    admin: true,
+  });
+}
 
 /* our authentication mechanism proper. returns username if the request contains the Basic
  * authorization header containg a username and password found in users. Otherwise it
@@ -24,7 +26,7 @@ const users = {
  */
 const authenticate = (req, res) => {
   const [user, pass] = parseBasic(req)
-  if(users[user] && sha256(pass) === users[user].password) {
+  if(user && pass && users.where({ user, password: sha256(pass) }).items.length > 0) {
     return user
   }
   promptForAuth(res)
@@ -40,19 +42,15 @@ const requestHandler = (req, res) => {
   if(req.url.indexOf("users") !== -1) {
     const user = authenticate(req,res)
     // checking for authentication and authorization
-    if(user && users[user].admin) {
-      // probably *shouldn't* combine these, but upsert seems nice
-      if(req.method === "POST" || req.method === "PUT") {
+    if(user && users.where({ user }).items[0].admin) {
+      if(req.method === "POST") {
         getBody(req).then(body => {
-          // if no password provided, use existing one
-          // (this is why probably shouldn't combine)
-          const password = body.pass ?
-              sha256(body.pass) : users[body.user].password
-          // save the user
-          users[body.user] = {
-            password,
+          users.insert({
+            user: body.user,
+            password: body.pass,
             admin: !!body.admin
-          }
+          })
+          users.save()
           // redirect to the admin page, since we're not ajaxing this
           res.writeHead(301, {
             Location: "/admin.html"
@@ -60,13 +58,33 @@ const requestHandler = (req, res) => {
         })
         .catch(() => res.writeHead(400))
         .finally(() => res.end())
+      } else if(req.method === "PUT") {
+        getBody(req).then(body => {
+          const match = req.url.match(/\/api\/users\/(\d+)/)
+          if(match && match[1]) {
+            // if no password provided, use existing one
+            const password = body.pass ? sha256(body.pass) : undefined
+            // save the user
+            users.update(match[1]*1, {
+              user: body.user,
+              password,
+              admin: !!body.admin
+            })
+            users.save()
+            res.writeHead(200)
+          } else {
+            throw "poo"
+          }
+        })
+        .catch(() => res.writeHead(400))
+        .finally(() => res.end())
       } else if(req.method === "DELETE") {
         // remove user is a whole lot like remove from listOfThings
-        // we match on /api/users/<any string>
-        const match = req.url.match(/\/api\/users\/(.+)/)
+        // we match on /api/users/<cid>
+        const match = req.url.match(/\/api\/users\/(\d+)/)
         if(match && match[1]) {
-          // delete from object is a nicer syntax, I suppose
-          delete users[match[1]]
+          users.remove(1*match[1])
+          users.save()
           res.writeHead(200)
           res.end()
         } else {
@@ -77,11 +95,9 @@ const requestHandler = (req, res) => {
         res.writeHead(200)
         // we really shouldn't send passwords to the front
         // even if they're hashed.
-        const usersNoP = Object.fromEntries(
-          Object.entries(users)
-            .map(u => [u[0], { admin: u[1].admin }])
-        );
-        res.write(JSON.stringify(usersNoP))
+        res.write(JSON.stringify(
+          users.items.map(u => ({ ...u, password: undefined }))
+        ))
         res.end()
       }
     } else {
