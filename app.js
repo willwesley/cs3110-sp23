@@ -19,26 +19,19 @@ if(users.items.length === 0) {
   });
 }
 
-const subscribers = {};
+let subscribers = [];
 const notify = () => {
-  Object.values(subscribers).forEach((res) => {
-    res.write(JSON.stringify(
-      things.items 
-    ))
-    res.end()
+  const payload = JSON.stringify(things.items)
+  subscribers.forEach(([req, res]) => {
+    if(req.headers.accept === "text/event-stream") {
+      res.write("data: " + payload + "\n\n")
+    } else {
+      res.write(payload)
+      res.end()
+    }
   })
 };
 
-    const countdown = (res, n) => {
-      res.write("id: " + n + "\n")
-      console.log(n, n> 0)
-      res.write("data: " + n + "\n\n")
-      if(n > 0) {
-        setTimeout(() => countdown(res, n-1),  1000)
-      } else {
-        res.end()
-      }
-    }
 /* our authentication mechanism proper. returns username if the request contains the Basic
  * authorization header containg a username and password found in users. Otherwise it
  * prompts for a username and password by sending the appropriate headers and response code
@@ -128,17 +121,19 @@ const requestHandler = (req, res) => {
       })
       res.end()
     }
-  } else if(req.url === "/api/countdown") {
-    res.writeHead(200, {
-      'Content-Type': "text/event-stream",
-      'Connection': "keep-alive",
-      'Cache-Control': "no-cache",
-      "X-Accel-Buffering": "no",
-    })
-    countdown(res, 10)
   } else if(req.url === "/api/subscribe") {
-    subscribers[req] = res
-    req.on("close", () => delete subscribers[req])
+    if(req.headers.accept === "text/event-stream") {
+      res.writeHead(200, {
+        'Content-Type': "text/event-stream",
+        'Connection': "keep-alive",
+        'Cache-Control': "no-cache",
+        "X-Accel-Buffering": "no",
+      })
+    }
+    const i = Math.random()
+    subscribers.push([req, res, i])
+    req.on("close", () => subscribers = subscribers.filter(
+      ([req, res, j]) => i !== j))
   } else if(req.method === "POST") {
     // check for auth
     const user = authenticate(req,res)
