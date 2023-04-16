@@ -1,6 +1,7 @@
 {
   "dependencies": {
     "locallydb": "^0.0.9",
-    "sqlite3": "^5.1.6"
+    "sqlite3": "^5.1.6",
+    "ws": "^8.13.0"
   }
 }
