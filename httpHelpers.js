@@ -34,5 +34,26 @@ const getBody = (req) => new Promise((resolve, reject) => {
   })
 })
 
-module.exports = getBody
+/* deletes are pretty damn uniform
+ * @param req request object
+ * @param res response object
+ * @param regex pattern to match cid that has one group
+ * @param collection locallydb collection to delete from
+ */
+const handleDelete = (req, res, regex, collection) => {
+  const match = req.url.match(regex)
+  if(match && match[1]) {
+    collection.remove(1*match[1])
+    collection.save()
+    res.writeHead(200)
+    res.end()
+    return true
+  } else {
+    res.writeHead(400)
+    res.end()
+    return false
+  }
+}
+
+module.exports = { handleDelete, getBody }
 
