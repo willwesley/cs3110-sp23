@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+const WebSocket = require("ws")
 const locallydb = require("locallydb")
 const db = new locallydb("./mydb")
 const things = db.collection("nope")
@@ -20,6 +21,7 @@ const notify = () => {
       res.end()
     }
   })
+  sendWs(JSON.stringify(things.items))
 };
 
 /* http request handler (router and dispatcher)
@@ -94,3 +96,18 @@ const requestHandler = (req, res) => {
 
 const server = http.createServer(requestHandler);
 server.listen(3000)
+
+const wss = new WebSocket.WebSocketServer({
+  server
+})
+wss.on("connection", (ws) => {
+  ws.send(JSON.stringify(things.items))
+})
+const sendWs = (message) => {
+  wss.clients.forEach(ws => {
+    if(ws.readyState === WebSocket.OPEN) {
+      ws.send(message)
+    }
+  })
+}
+
